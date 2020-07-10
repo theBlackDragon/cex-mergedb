@@ -356,6 +356,10 @@ object Merge extends Logging {
     connection.commit()
   }
 
+  /** List all the mod controllers present in a game db
+    *
+    * @return a Map containing the controller class and id, respectively
+    */
   private def listControllers(connection: Connection): Map[String, String] = {
     val statement = connection.prepareStatement("select ap.class, ap.id from actor_position ap join mod_controllers mc on ap.id = mc.id")
     val resultSet = statement.executeQuery()
