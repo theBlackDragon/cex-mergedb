@@ -58,11 +58,11 @@ object Merge extends Logging {
         val outputConnection = SaveDatabase.open(outputDatabase).connection
         val childConnection = SaveDatabase.open(tmpChildDb).connection
 
-        logger.info("Remapping object IDs")
-        mergeActorPosition(childConnection, outputConnection)
-
         logger.info("Remapping mod controller IDs")
         mergeModControllers(childConnection, outputConnection)
+
+        logger.info("Remapping object IDs")
+        mergeActorPosition(childConnection, outputConnection)
 
         logger.info("Copying tables")
         tablesToCopy.foreach(tableName => copyTable(tableName, childConnection, outputConnection))
@@ -163,6 +163,8 @@ object Merge extends Logging {
     val iiStatement = from.prepareStatement("update item_inventory set owner_id = ? where owner_id = ?")
     val ipStatement = from.prepareStatement("update item_properties set owner_id = ? where owner_id = ?")
 
+    val mcStatement = from.prepareStatement("update mod_controllers set id = ? where id = ?")
+
     val pStatement = from.prepareStatement("update properties set object_id = ? where object_id = ?")
     val purgeScoresStatement = from.prepareStatement("update purgescores set purgeid = ? where purgeid = ?")
 
@@ -236,6 +238,11 @@ object Merge extends Logging {
       ipStatement.setInt(1, newId)
       ipStatement.setInt(2, oldId)
       ipStatement.addBatch()
+
+      // mod_controller (id)
+      mcStatement.setInt(1, newId)
+      mcStatement.setInt(2, oldId)
+      mcStatement.addBatch()
 
       // purgescores (id matches character id)
       purgeScoresStatement.setInt(1, newId)
@@ -316,26 +323,35 @@ object Merge extends Logging {
     logger.trace(s"fromControllers: $fromControllers")
     logger.trace(s"toControllers: $toControllers")
 
-    fromControllers.foreach(tuple => toControllers.get(tuple._1) match {
+    fromControllers.foreach(fromTuple => toControllers.get(fromTuple._1) match {
       case Some(targetId) =>
-        logger.trace(s"${tuple._1} exists in target db, source id: ${tuple._2}, target id: $targetId")
-        updateControllerId(from, tuple._2, targetId)
+        logger.trace(s"${fromTuple._1} exists in target db, source id: ${fromTuple._2}, target id: $targetId")
+        updateControllerId(from, fromTuple._2, targetId)
       case None =>
-        logger.trace(s"${tuple._1} not present in target db, copying unchanged.")
+        logger.trace(s"${fromTuple._1} not present in target db, copying unchanged.")
     })
   }
 
-  private def updateControllerId(connection: Connection, oldId: String, newId: String): Unit = {
-    logger.debug(s"Updating controller with ID $oldId to new ID $newId")
+  private def updateControllerId(connection: Connection, oldId: String, targetId: String): Unit = {
+    logger.debug(s"Updating controller with ID $oldId to new ID $targetId")
 
+    // Remove the mod controllers we already have in the target from actor_position so they are not copied later in
+    // the process.
     val modConStatement = connection.prepareStatement("delete from mod_controllers where id = ?")
     modConStatement.setString(1, oldId)
     modConStatement.executeUpdate()
 
-    val apStatement = connection.prepareStatement("update actor_position set id = ? where id = ?")
-    apStatement.setString(1, newId)
-    apStatement.setString(2, oldId)
+    val apStatement = connection.prepareStatement("delete from actor_position where id = ?")
+    apStatement.setString(1, oldId)
     apStatement.executeUpdate()
+
+    // we repoint the existing records to the controller ID we found in the target database
+    val pStatement = connection.prepareStatement("update properties set object_id = ? where object_id = ?")
+    pStatement.setString(1, targetId)
+    pStatement.setString(2, oldId)
+    pStatement.executeUpdate()
+
+    // TODO check if mod controller references pop up in any other tables
 
     connection.commit()
   }
