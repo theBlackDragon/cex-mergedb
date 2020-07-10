@@ -255,31 +255,6 @@ object Merge extends Logging {
       pStatement.addBatch()
 
       batchCounter+=1
-      if(batchCounter % 1000 == 0) {
-        apStatement.executeBatch()
-
-        biStatement.executeBatch()
-        bhStatement.executeBatch()
-        bStatement.executeBatch()
-        bOwnerStatement.executeBatch()
-
-        cStatement.executeBatch()
-        csStatement.executeBatch()
-
-        fmStatement.executeBatch()
-
-        gStatement.executeBatch()
-        geStatement.executeBatch()
-        geOwnerStatement.executeBatch()
-
-        pStatement.executeBatch()
-        purgeScoresStatement.executeBatch()
-
-        iiStatement.executeBatch()
-        ipStatement.executeBatch()
-
-        logger.debug(s"Inserted $batchCounter updated object_ids")
-      }
     }
 
     apStatement.executeBatch()
