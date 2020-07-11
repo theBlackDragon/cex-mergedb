@@ -2,7 +2,7 @@ package be.lair.conan.mergedb.db
 
 import java.io.{File, FileOutputStream}
 import java.nio.file.Files
-import java.sql.Connection
+import java.sql.{Connection, SQLException}
 
 import grizzled.slf4j.Logging
 
@@ -58,21 +58,32 @@ object Merge extends Logging {
         val outputConnection = SaveDatabase.open(outputDatabase).connection
         val childConnection = SaveDatabase.open(tmpChildDb).connection
 
-        logger.info("Remapping mod controller IDs")
-        mergeModControllers(childConnection, outputConnection)
+        try {
+          logger.info("Remapping mod controller IDs")
+          mergeModControllers(childConnection, outputConnection)
 
-        logger.info("Remapping object IDs")
-        mergeActorPosition(childConnection, outputConnection)
+          logger.info("Remapping object IDs")
+          mergeActorPosition(childConnection, outputConnection)
 
-        logger.info("Copying tables")
-        tablesToCopy.foreach(tableName => copyTable(tableName, childConnection, outputConnection))
+          logger.info("Copying tables")
+          tablesToCopy.foreach(tableName => copyTable(tableName, childConnection, outputConnection))
 
-        logger.info("Running sanity checks on merged database...")
-        if (sanityCheck(outputConnection)) {
-          logger.info("Sanity check passed.")
-        } else {
-          logger.error("Sanity check failed!")
-          System.exit(1)
+          logger.info("Running sanity checks on merged database...")
+          if (sanityCheck(outputConnection)) {
+            logger.info("Sanity check passed.")
+          } else {
+            logger.error("Sanity check failed!")
+            System.exit(1)
+          }
+        } catch {
+          case e: SQLException => logger.error(e.getMessage, e)
+        } finally {
+          childConnection.close()
+          outputConnection.close()
+
+          if(!tmpChildDb.delete()) {
+            logger.warn(s"Unable to remove temporary database at ${tmpChildDb.getAbsolutePath}")
+          }
         }
     }
   }
