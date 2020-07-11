@@ -293,6 +293,7 @@ object Merge extends Logging {
     geStatement.executeBatch()
     geCauserStatement.executeBatch()
     geOwnerStatement.executeBatch()
+    mcStatement.executeBatch()
     pStatement.executeBatch()
     purgeScoresStatement.executeBatch()
     iiStatement.executeBatch()
