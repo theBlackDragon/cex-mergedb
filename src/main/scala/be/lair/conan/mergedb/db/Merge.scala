@@ -174,6 +174,7 @@ object Merge extends Logging {
 
     val gStatement = from.prepareStatement("update guilds set owner = ?  where owner = ?")
     val geStatement = from.prepareStatement("update game_events set objectId = ? where objectId = ?")
+    val geCauserStatement = from.prepareStatement("update game_events set causerId = ? where causerId = ?")
     val geOwnerStatement = from.prepareStatement("update game_events set ownerId = ? where ownerId = ?")
 
     val iiStatement = from.prepareStatement("update item_inventory set owner_id = ? where owner_id = ?")
@@ -235,6 +236,11 @@ object Merge extends Logging {
       geStatement.setInt(2, oldId)
       geStatement.addBatch()
 
+      // game_events (causerId)
+      geCauserStatement.setInt(1, newId)
+      geCauserStatement.setInt(2, oldId)
+      geCauserStatement.addBatch()
+
       // game_events (ownerId)
       geOwnerStatement.setInt(1, newId)
       geOwnerStatement.setInt(2, oldId)
@@ -283,11 +289,10 @@ object Merge extends Logging {
     fmStatement.executeBatch()
     gStatement.executeBatch()
     geStatement.executeBatch()
+    geCauserStatement.executeBatch()
     geOwnerStatement.executeBatch()
-
     pStatement.executeBatch()
     purgeScoresStatement.executeBatch()
-
     iiStatement.executeBatch()
     ipStatement.executeBatch()
 
