@@ -157,8 +157,7 @@ object Merge extends Logging {
     logger.debug(s"Target DB maxId $maxId")
 
     val statement = from.createStatement()
-    val resultSet = statement.executeQuery("select id from actor_position " +
-      "where id not in (select * from mod_controllers)")
+    val resultSet = statement.executeQuery("select id from actor_position")
 
     val apStatement = from.prepareStatement("update actor_position set id = ? where id = ?")
 
