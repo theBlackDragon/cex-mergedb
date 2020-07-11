@@ -67,8 +67,13 @@ object Merge extends Logging {
         logger.info("Copying tables")
         tablesToCopy.foreach(tableName => copyTable(tableName, childConnection, outputConnection))
 
-        childConnection.close()
-        outputConnection.close()
+        logger.info("Running sanity checks on merged database...")
+        if (sanityCheck(outputConnection)) {
+          logger.info("Sanity check passed.")
+        } else {
+          logger.error("Sanity check failed!")
+          System.exit(1)
+        }
     }
   }
 
@@ -343,5 +348,118 @@ object Merge extends Logging {
       tuple._1.getString(1) -> tuple._1.getString(2)).toMap
   }
 
+  /** Perform a database sanity check
+    *
+    * @return true if sane, false otherwise
+    */
+  private def sanityCheck(connection: Connection): Boolean = {
+    // check for duplicate entries
+    val validationQueries = List(
+      // check for duplicate object_ids
+      "select class from actor_position group by id having count(*) > 1",
+      "select object_id from building_instances group by object_id, instance_id having count(*) > 1",
+      "select object_id from buildings group by object_id having count(*) > 1",
 
+      // Check for IDs that can't be mapped back to actor_position
+      "select * from buildable_health bh " +
+        "left outer join actor_position ap " +
+        "on bh.object_id = ap.id " +
+        "where ap.id is null",
+      "select * from building_instances bi " +
+        "left outer join actor_position ap " +
+        "on bi.object_id = ap.id " +
+        " where ap.id is null",
+      "select * from buildings b " +
+        "left outer join actor_position ap " +
+        "on b.object_id = ap.id " +
+        "where ap.id is null",
+      //if owner is 0 we're probably dealing with a record from static_buildables
+      "select * from (select * from buildings b " +
+        "left outer join actor_position ap " +
+        "on b.owner_id = ap.id " +
+        "where ap.id is null) ids " +
+        "join static_buildables sb " +
+        "on ids.object_id = sb.id " +
+        "where ids.id is not null",
+      // todo validate?
+//      "select * from character_stats cs " +
+//        "left outer join actor_position ap " +
+//        "on cs.char_id = ap.id " +
+//        "where ap.id is null",
+      "select * from characters c " +
+        "left outer join actor_position ap " +
+        "on c.id = ap.id " +
+        "where ap.id is null",
+      "select * from follower_markers fm " +
+        "left outer join actor_position ap " +
+        "on fm.owner_id = ap.id " +
+        "where ap.id is null",
+      "select * from follower_markers fm " +
+        "left outer join actor_position ap " +
+        "on fm.follower_id = ap.id " +
+        "where ap.id is null",
+      "select * from game_events ge " +
+        "left outer join actor_position ap " +
+        "on (ge.ownerId = ap.id or ge.ownerId == 0) " +
+        "where ap.id is null",
+      "select * from game_events ge " +
+        "left outer join actor_position ap " +
+        "on (ge.causerId = ap.id or ge.causerId == 0) " +
+        "where ap.id is null",
+      "select * from guilds g " +
+        "left outer join actor_position ap " +
+        "on g.owner = ap.id " +
+        "where ap.id is null",
+      // non-existing owner_id, lootbag?
+//      "select * from item_inventory ii " +
+//        "left outer join actor_position ap " +
+//        "on ii.owner_id = ap.id " +
+//        "where ap.id is null",
+//      "select * from item_properties ip " +
+//        "left outer join actor_position ap " +
+//        "on ip.owner_id = ap.id " +
+//        "where ap.id is null",
+      "select * from mod_controllers mc " +
+        "left outer join actor_position ap " +
+        "on mc.id = ap.id " +
+        "where ap.id is null",
+      "select * from properties p " +
+        "left outer join actor_position ap " +
+        "on p.object_id = ap.id " +
+        "where ap.id is null",
+      "select * from purgescores ps " +
+        "left outer join actor_position ap " +
+        "on ps.purgeid = ap.id " +
+        "where ap.id is null",
+
+      // check whether all Thralls have their inventories
+      "select * from item_inventory ii " +
+        "left outer join actor_position ap " +
+        "on ap.id = ii.owner_id " +
+        "where ap.class like '/Game/Characters/NPCs/%' " +
+        "and ap.id is null"
+    )
+    validationQueries.forall(isValid(connection, _))
+  }
+
+  /** Run a validation query
+    *
+    * The result is considered valid of the query doesn't return any records.
+    *
+    * @param connection the connection to run the query on
+    * @param query the query to run
+    * @return true if valid, false if invalid
+    */
+  private def isValid(connection: Connection, query: String): Boolean = {
+    logger.trace(s"Running query $query")
+    val statement = connection.createStatement()
+    val resultSet = statement.executeQuery(query)
+
+    if(resultSet.next()) {
+      logger.error(s"Issues exist for validation query: $query")
+      false
+    } else {
+      true
+    }
+  }
 }
