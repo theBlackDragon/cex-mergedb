@@ -153,8 +153,11 @@ object Merge extends Logging {
     * T.e object_id values in other columns refer to the id column in actor_position, so should be updated as well.
     */
   private def mergeActorPosition(from: Connection, to: Connection): Unit ={
-    val maxId = getMaxId(to)
-    logger.debug(s"Target DB maxId $maxId")
+    val maxId = {
+      List(getMaxId(to),getMaxId(from)).max
+    }
+    // Using the largest object_id from the databases involved to avoid id duplication
+    logger.debug(s"maxId $maxId")
 
     val statement = from.createStatement()
     val resultSet = statement.executeQuery("select id from actor_position")
