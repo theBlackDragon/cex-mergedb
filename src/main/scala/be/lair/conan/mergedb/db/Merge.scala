@@ -2,7 +2,7 @@ package be.lair.conan.mergedb.db
 
 import java.io.{File, FileOutputStream}
 import java.nio.file.Files
-import java.sql.{Connection, SQLException}
+import java.sql.{Connection, PreparedStatement, SQLException}
 
 import grizzled.slf4j.Logging
 
@@ -162,30 +162,30 @@ object Merge extends Logging {
     val statement = from.createStatement()
     val resultSet = statement.executeQuery("select id from actor_position")
 
-    val apStatement = from.prepareStatement("update actor_position set id = ? where id = ?")
+    val updateStatements: List[PreparedStatement] = List(
+      "update actor_position set id = ? where id = ?",
 
-    val biStatement = from.prepareStatement("update building_instances set object_id = ? where object_id = ?")
-    val bhStatement = from.prepareStatement("update buildable_health set object_id = ? where object_id = ?")
-    val bStatement = from.prepareStatement("update buildings set object_id = ? where object_id = ?")
-    val bOwnerStatement = from.prepareStatement("update buildings set owner_id = ? where owner_id = ?")
+      "update building_instances set object_id = ? where object_id = ?",
+      "update buildable_health set object_id = ? where object_id = ?",
+      "update buildings set object_id = ? where object_id = ?",
+      "update buildings set owner_id = ? where owner_id = ?",
 
-    val cStatement = from.prepareStatement("update characters set id = ? where id = ?")
-    val csStatement = from.prepareStatement("update character_stats set char_id = ?  where char_id = ?")
+      "update characters set id = ? where id = ?",
+      "update character_stats set char_id = ?  where char_id = ?",
 
-    val fmStatement = from.prepareStatement("update follower_markers set owner_id = ?  where owner_id = ?")
+      "update follower_markers set owner_id = ?  where owner_id = ?",
 
-    val gStatement = from.prepareStatement("update guilds set owner = ?  where owner = ?")
-    val geStatement = from.prepareStatement("update game_events set objectId = ? where objectId = ?")
-    val geCauserStatement = from.prepareStatement("update game_events set causerId = ? where causerId = ?")
-    val geOwnerStatement = from.prepareStatement("update game_events set ownerId = ? where ownerId = ?")
+      "update guilds set owner = ?  where owner = ?",
+      "update game_events set objectId = ? where objectId = ?",
+      "update game_events set causerId = ? where causerId = ?",
+      "update game_events set ownerId = ? where ownerId = ?",
 
-    val iiStatement = from.prepareStatement("update item_inventory set owner_id = ? where owner_id = ?")
-    val ipStatement = from.prepareStatement("update item_properties set owner_id = ? where owner_id = ?")
-
-    val mcStatement = from.prepareStatement("update mod_controllers set id = ? where id = ?")
-
-    val pStatement = from.prepareStatement("update properties set object_id = ? where object_id = ?")
-    val purgeScoresStatement = from.prepareStatement("update purgescores set purgeid = ? where purgeid = ?")
+      "update item_inventory set owner_id = ? where owner_id = ?",
+      "update item_properties set owner_id = ? where owner_id = ?",
+      "update mod_controllers set id = ? where id = ?",
+      "update properties set object_id = ? where object_id = ?",
+      "update purgescores set purgeid = ? where purgeid = ?"
+    ).map(from.prepareStatement)
 
     var batchCounter = 0
     Iterator.continually((resultSet, resultSet.next())).takeWhile(_._2).foreach { rs =>
@@ -193,111 +193,16 @@ object Merge extends Logging {
       val newId = oldId + maxId
       logger.debug(s"Remapping objectId $oldId to $newId")
 
-      // actor_position
-      apStatement.setInt(1, newId)
-      apStatement.setInt(2, oldId)
-      apStatement.addBatch()
-
-      // building_instances
-      biStatement.setInt(1, newId)
-      biStatement.setInt(2, oldId)
-      biStatement.addBatch()
-
-      // buildable_health
-      bhStatement.setInt(1, newId)
-      bhStatement.setInt(2, oldId)
-      bhStatement.addBatch()
-
-      // buildings
-      bStatement.setInt(1, newId)
-      bStatement.setInt(2, oldId)
-      bStatement.addBatch()
-
-      // buildings (owner_id)
-      bOwnerStatement.setInt(1, newId)
-      bOwnerStatement.setInt(2, oldId)
-      bOwnerStatement.addBatch()
-
-      // update characters table
-      cStatement.setInt(1, newId)
-      cStatement.setInt(2, oldId)
-      cStatement.addBatch()
-
-      // character_stats
-      csStatement.setInt(1, newId)
-      csStatement.setInt(2, oldId)
-      csStatement.addBatch()
-
-      // follower_markers (owner_id)
-      fmStatement.setInt(1, newId)
-      fmStatement.setInt(2, oldId)
-      fmStatement.addBatch()
-
-      // game_events
-      geStatement.setInt(1, newId)
-      geStatement.setInt(2, oldId)
-      geStatement.addBatch()
-
-      // game_events (causerId)
-      geCauserStatement.setInt(1, newId)
-      geCauserStatement.setInt(2, oldId)
-      geCauserStatement.addBatch()
-
-      // game_events (ownerId)
-      geOwnerStatement.setInt(1, newId)
-      geOwnerStatement.setInt(2, oldId)
-      geOwnerStatement.addBatch()
-
-      // guilds (owner)
-      gStatement.setInt(1, newId)
-      gStatement.setInt(2, oldId)
-      gStatement.addBatch()
-
-      // item_inventory (owner_id)
-      iiStatement.setInt(1, newId)
-      iiStatement.setInt(2, oldId)
-      iiStatement.addBatch()
-
-      // item_properties (owner_id)
-      ipStatement.setInt(1, newId)
-      ipStatement.setInt(2, oldId)
-      ipStatement.addBatch()
-
-      // mod_controller (id)
-      mcStatement.setInt(1, newId)
-      mcStatement.setInt(2, oldId)
-      mcStatement.addBatch()
-
-      // purgescores (id matches character id)
-      purgeScoresStatement.setInt(1, newId)
-      purgeScoresStatement.setInt(2, oldId)
-      purgeScoresStatement.addBatch()
-
-      // properties
-      pStatement.setInt(1, newId)
-      pStatement.setInt(2, oldId)
-      pStatement.addBatch()
+      updateStatements.foreach{statement =>
+        statement.setInt(1, newId)
+        statement.setInt(2, oldId)
+        statement.addBatch()
+      }
 
       batchCounter+=1
     }
 
-    apStatement.executeBatch()
-    biStatement.executeBatch()
-    bhStatement.executeBatch()
-    bStatement.executeBatch()
-    bOwnerStatement.executeBatch()
-    cStatement.executeBatch()
-    csStatement.executeBatch()
-    fmStatement.executeBatch()
-    gStatement.executeBatch()
-    geStatement.executeBatch()
-    geCauserStatement.executeBatch()
-    geOwnerStatement.executeBatch()
-    mcStatement.executeBatch()
-    pStatement.executeBatch()
-    purgeScoresStatement.executeBatch()
-    iiStatement.executeBatch()
-    ipStatement.executeBatch()
+    updateStatements.foreach(_.executeBatch())
 
     from.commit()
     logger.info(s"Updated $batchCounter object_ids")
