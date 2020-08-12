@@ -10,7 +10,6 @@ scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked")
 
 libraryDependencies ++= Seq(
   "ch.qos.logback" % "logback-classic" % "1.2.3",
-  "io.getquill" %% "quill-jdbc" % "3.4.10",
   "org.clapper" %% "grizzled-slf4j" % "1.3.4",
   "org.xerial" % "sqlite-jdbc" % "3.28.0",
   "org.scalatest" %% "scalatest" % "3.0.8" % Test
