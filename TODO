@@ -1,7 +1,5 @@
 TODO:
- - set an active player character. The current version simply dumps you into character creation, something like
-   MikeysToolbox should work for the interim.
- - handle the static_buildables table (just ignored currently)
- - test whether inventories are intact, both of players as well as of placeables
- - handle overlapping buildings?
+ - handle the static_buildables table. Causes duplication and breaks sanity check.
  - build a UI
+ - multiple severities for sanity checks
+ - handle duplicate character IDs (currently just ignored, meaning the source database character and associated data is just not copied)
