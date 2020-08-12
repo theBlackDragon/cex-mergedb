@@ -59,15 +59,22 @@ object Merge extends Logging {
         val childConnection = SaveDatabase.open(tmpChildDb).connection
 
         try {
+          // remap conflicts
+          // need to do this here since we'll be increasing the max(objectid) in the target database
+          resolveCharacterConflicts(childConnection, outputConnection)
+
+          // remap non-conflicts
           logger.info("Remapping mod controller IDs")
           mergeModControllers(childConnection, outputConnection)
 
           logger.info("Remapping object IDs")
           mergeActorPosition(childConnection, outputConnection)
 
+          // copy data
           logger.info("Copying tables")
           tablesToCopy.foreach(tableName => copyTable(tableName, childConnection, outputConnection))
 
+          // verify result
           logger.info("Running sanity checks on merged database...")
           if (sanityCheck(outputConnection)) {
             logger.info("Sanity check passed.")
@@ -86,6 +93,70 @@ object Merge extends Logging {
           }
         }
     }
+  }
+
+  /** Resolve character objectId conflicts between databases
+    *
+    * Remapping character objectIds results in loss of ownership of Thralls.
+    * It seems Thrall ownership is stored within the binary blob holding their properties.
+    * Instead of trying to work out how to rewrite those we simply avoid remapping character objectIds in the source,
+    * as was initially done, instead preferring to remap conflicting IDs in the target database.
+    *
+    * This does not handle the case where characters in both databases have the same ID.
+    * These characters are simply ignored during the merge, preferring the target characters.
+    * TODO remap these conflicting characters but show a warning about what is going on so the user is aware.
+    */
+  private def resolveCharacterConflicts(from: Connection, to: Connection): List[Int] = {
+    // select character IDs from source database
+    val fromCharacterIds = listCharacterIds(from)
+    logger.debug(s"fromCharacterIds: $fromCharacterIds")
+
+    // see if they conflict with character IDs in target
+    val toCharacterIds = listCharacterIds(to)
+    logger.debug(s"toCharacterIds: $toCharacterIds")
+    val conflictingCharacterIds = fromCharacterIds.intersect(toCharacterIds)
+    logger.info(s"Character IDs present in both databases: ${conflictingCharacterIds.mkString(",")}")
+
+    if(conflictingCharacterIds.nonEmpty)
+      logger.error("Character object_id conflicts detected, remapping character IDs will result in remapped " +
+        "characters losing access to their Thralls.")
+
+    // see if they conflict with any other IDs in target
+    val conflictingObjectIds = findConflictingObjectIds(to, fromCharacterIds)
+    logger.info(s"Character IDs from source clashing with object_ids in target database: ${conflictingObjectIds.mkString(",")}")
+    mergeConflictIds(to, conflictingObjectIds)
+
+    conflictingObjectIds
+  }
+
+  /** Return a list of IDs that conflict with the passed in IDs
+    *
+    * @param connection connection to look for conflicts on
+    * @param ids list of IDs we want to check duplicates for
+    */
+  private def findConflictingObjectIds(connection: Connection, ids: List[Int]): List[Int] = {
+    val statement = connection.prepareStatement(
+      s"select id from actor_position where id in (${List.fill(ids.length)("?").mkString(",")})")
+    for(i <- ids.indices) {
+      statement.setInt(i+1, ids(i))
+    }
+    val resultSet = statement.executeQuery()
+
+    Iterator.continually((resultSet, resultSet.next())).takeWhile(_._2).map(resultTuple =>
+      resultTuple._1.getInt(1)).toList
+  }
+
+  /** Return a list of all character object_ids
+    *
+    * @param connection the connection to list the characters from
+    * @return a list of character object_ids as Int values
+    */
+  private def listCharacterIds(connection: Connection): List[Int] = {
+    val statement = connection.createStatement()
+    val resultSet = statement.executeQuery("select id from characters")
+
+    Iterator.continually((resultSet, resultSet.next())).takeWhile(_._2).map(resultTuple =>
+      resultTuple._1.getInt(1)).toList
   }
 
   /**
@@ -145,6 +216,31 @@ object Merge extends Logging {
     to.commit()
   }
 
+  private val objectIdUpdateStatements: List[String] = List(
+    "update actor_position set id = ? where id = ?",
+
+    "update building_instances set object_id = ? where object_id = ?",
+    "update buildable_health set object_id = ? where object_id = ?",
+    "update buildings set object_id = ? where object_id = ?",
+    "update buildings set owner_id = ? where owner_id = ?",
+
+    "update characters set id = ? where id = ?",
+    "update character_stats set char_id = ?  where char_id = ?",
+
+    "update follower_markers set owner_id = ?  where owner_id = ?",
+
+    "update guilds set owner = ?  where owner = ?",
+    "update game_events set objectId = ? where objectId = ?",
+    "update game_events set causerId = ? where causerId = ?",
+    "update game_events set ownerId = ? where ownerId = ?",
+
+    "update item_inventory set owner_id = ? where owner_id = ?",
+    "update item_properties set owner_id = ? where owner_id = ?",
+    "update mod_controllers set id = ? where id = ?",
+    "update properties set object_id = ? where object_id = ?",
+    "update purgescores set purgeid = ? where purgeid = ?"
+  )
+
   /** Remap actor reference IDs that are not mod controllers
     *
     * Need to avoid duplicate IDs pointing to different objects, so remapping everything to IDs past the largest found
@@ -157,35 +253,14 @@ object Merge extends Logging {
       List(getMaxId(to),getMaxId(from)).max
     }
     // Using the largest object_id from the databases involved to avoid id duplication
-    logger.debug(s"maxId $maxId")
+    logger.debug(s"maxId $maxId based on largest table")
 
     val statement = from.createStatement()
-    val resultSet = statement.executeQuery("select id from actor_position")
+    val resultSet = statement.executeQuery("select id from actor_position "
+      + "where id not in (select id from static_buildables)" // ignore static_buildables
+      + "and id not in (select id from characters)") // avoid updating character IDs
 
-    val updateStatements: List[PreparedStatement] = List(
-      "update actor_position set id = ? where id = ?",
-
-      "update building_instances set object_id = ? where object_id = ?",
-      "update buildable_health set object_id = ? where object_id = ?",
-      "update buildings set object_id = ? where object_id = ?",
-      "update buildings set owner_id = ? where owner_id = ?",
-
-      "update characters set id = ? where id = ?",
-      "update character_stats set char_id = ?  where char_id = ?",
-
-      "update follower_markers set owner_id = ?  where owner_id = ?",
-
-      "update guilds set owner = ?  where owner = ?",
-      "update game_events set objectId = ? where objectId = ?",
-      "update game_events set causerId = ? where causerId = ?",
-      "update game_events set ownerId = ? where ownerId = ?",
-
-      "update item_inventory set owner_id = ? where owner_id = ?",
-      "update item_properties set owner_id = ? where owner_id = ?",
-      "update mod_controllers set id = ? where id = ?",
-      "update properties set object_id = ? where object_id = ?",
-      "update purgescores set purgeid = ? where purgeid = ?"
-    ).map(from.prepareStatement)
+    val updateStatements = objectIdUpdateStatements.map(from.prepareStatement)
 
     var batchCounter = 0
     Iterator.continually((resultSet, resultSet.next())).takeWhile(_._2).foreach { rs =>
@@ -193,19 +268,49 @@ object Merge extends Logging {
       val newId = oldId + maxId
       logger.debug(s"Remapping objectId $oldId to $newId")
 
-      updateStatements.foreach{statement =>
-        statement.setInt(1, newId)
-        statement.setInt(2, oldId)
-        statement.addBatch()
-      }
+      updateObjectId(updateStatements, oldId, newId)
 
       batchCounter+=1
     }
-
     updateStatements.foreach(_.executeBatch())
 
     from.commit()
     logger.info(s"Updated $batchCounter object_ids")
+  }
+
+  /** Remap the specified object_ids to avoid duplicates
+    *
+    * Reassign new objectIds past the end of the max(objectId) in the connection.
+    */
+  private def mergeConflictIds(to: Connection, conflictIds: List[Int]): Unit ={
+    logger.debug(s"Remapping conflictIds $conflictIds")
+    val maxId = getMaxId(to)
+    // Using the largest object_id from the databases involved to avoid id duplication
+    logger.debug(s"maxId $maxId based on target table")
+
+    val updateStatements = objectIdUpdateStatements.map(to.prepareStatement)
+
+    var batchCounter = 0
+    conflictIds.foreach{ oldId =>
+      batchCounter+=1
+
+      val newId = maxId + batchCounter
+      logger.debug(s"Remapping objectId $oldId to $newId")
+
+      updateObjectId(updateStatements, oldId, newId)
+    }
+    updateStatements.foreach(_.executeBatch())
+
+    to.commit()
+    logger.info(s"Updated $batchCounter conflicting object_ids")
+  }
+
+  private def updateObjectId(updateStatements: List[PreparedStatement], oldId: Int, newId: Int): Unit = {
+    updateStatements.foreach{statement =>
+      statement.setInt(1, newId)
+      statement.setInt(2, oldId)
+      statement.addBatch()
+    }
   }
 
   private def getMaxId(connection: Connection): Int = {
