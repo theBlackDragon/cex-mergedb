@@ -10,8 +10,8 @@ conflicts with those already present in the master.
 The tool was written to handle single-player games, be they local, or hosted on a dedicated server (the database format
 is the same), more specifically it was written to merge the various savegames I accrued over time.
 
-What does does not do
----------------------
+What it does not do
+-------------------
  * copy accounts (assumes a single account, which already should be present in all databases)
  * copy guilds
  * modify binary data (this might impact some mods, see also _Known limitations_)
