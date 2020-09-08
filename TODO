@@ -1,5 +1,4 @@
 TODO:
- - handle the static_buildables table. Causes duplication and breaks sanity check.
  - build a UI
  - multiple severities for sanity checks
  - handle duplicate character IDs (currently just ignored, meaning the source database character and associated data is just not copied)

@@ -40,8 +40,8 @@ object Merge extends Logging {
 
     ,"purgescores"
 
-    // TODO figure out what these are for, they're not always empty, so they are actually used for...something.
-    //,"static_buildables"
+    // these appear to be interactables in the world (eg. the forges in dungeons)
+    ,"static_buildables"
   )
 
   def merge(masterDatabase: File,
@@ -66,6 +66,9 @@ object Merge extends Logging {
           // remap non-conflicts
           logger.info("Remapping mod controller IDs")
           mergeModControllers(childConnection, outputConnection)
+
+          logger.info("Remapping static_buildables")
+          mergeStaticBuildables(childConnection, outputConnection)
 
           logger.info("Remapping object IDs")
           mergeActorPosition(childConnection, outputConnection)
@@ -238,7 +241,9 @@ object Merge extends Logging {
     "update item_properties set owner_id = ? where owner_id = ?",
     "update mod_controllers set id = ? where id = ?",
     "update properties set object_id = ? where object_id = ?",
-    "update purgescores set purgeid = ? where purgeid = ?"
+    "update purgescores set purgeid = ? where purgeid = ?",
+
+    "update static_buildables set id = ? where id = ?"
   )
 
   /** Remap actor reference IDs that are not mod controllers
@@ -373,6 +378,51 @@ object Merge extends Logging {
     val statement = connection.prepareStatement("select ap.class, ap.id from actor_position ap join mod_controllers mc on ap.id = mc.id")
     val resultSet = statement.executeQuery()
 
+    Iterator.continually((resultSet, resultSet.next())).takeWhile(_._2).map(tuple =>
+      tuple._1.getString(1) -> tuple._1.getString(2)).toMap
+  }
+
+  private def mergeStaticBuildables(from: Connection, to: Connection): Unit = {
+    val fromBuildables = listStaticBuildables(from)
+    val toBuildables = listStaticBuildables(to)
+
+    fromBuildables.foreach(fromTuple => toBuildables.get(fromTuple._1) match {
+      case Some(targetId) =>
+          updateStaticBuildableId(from, fromTuple._1, fromTuple._2, targetId)
+      case None =>
+        logger.trace(s"${fromTuple._1} not present in target db, copying unchanged.")
+    })
+  }
+
+  private def updateStaticBuildableId(connection: Connection,
+                                      sbClass: String,
+                                      oldId: String,
+                                      targetId: String): Unit = {
+    logger.debug(s"Updating static_buildable with ID $oldId to new ID $targetId")
+
+    // Remove the static_buildables we already have in the target from actor_position so they are not copied later in
+    // the process.
+    val modConStatement = connection.prepareStatement("delete from static_buildables where id = ?")
+    modConStatement.setString(1, oldId)
+    modConStatement.executeUpdate()
+
+    val apStatement = connection.prepareStatement("delete from actor_position where id = ? and class = ?")
+    apStatement.setString(1, oldId)
+    apStatement.setString(2, sbClass)
+    apStatement.executeUpdate()
+
+    // we repoint the existing records to the controller ID we found in the target database
+    val pStatement = connection.prepareStatement("update properties set object_id = ? where object_id = ? ")
+    pStatement.setString(1, targetId)
+    pStatement.setString(2, oldId)
+    pStatement.executeUpdate()
+
+    connection.commit()
+  }
+
+  private def listStaticBuildables(connection: Connection): Map[String, String] = {
+    val statement = connection.createStatement()
+    val resultSet = statement.executeQuery("select name, id from static_buildables")
     Iterator.continually((resultSet, resultSet.next())).takeWhile(_._2).map(tuple =>
       tuple._1.getString(1) -> tuple._1.getString(2)).toMap
   }
