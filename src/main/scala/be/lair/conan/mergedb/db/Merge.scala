@@ -63,6 +63,11 @@ object Merge extends Logging {
           // need to do this here since we'll be increasing the max(objectid) in the target database
           resolveCharacterConflicts(childConnection, outputConnection)
 
+          // deal with the scenario where both saves share the same parent, and as such contain items
+          // in the exact same spots.
+          // Trying to straighten this out likely will not go well if the savegames have diverged much.
+          removeDuplicateIds(childConnection, outputConnection)
+
           // remap non-conflicts
           logger.info("Remapping mod controller IDs")
           mergeModControllers(childConnection, outputConnection)
@@ -135,6 +140,71 @@ object Merge extends Logging {
     mergeConflictIds(to, conflictingObjectIds)
 
     (conflictingCharacterIds, conflictingObjectIds)
+  }
+
+  private def objectIdDeleteStatements: List[String] = List(
+    "delete from actor_position where id = ?",
+
+    "delete from building_instances where object_id = ?",
+    "delete from buildable_health where object_id = ?",
+    "delete from buildings where object_id = ?",
+    "delete from buildings where owner_id = ?",
+
+    "delete from item_inventory where owner_id = ?",
+    "delete from item_properties where owner_id = ?",
+
+    "delete from mod_controllers where id = ?",
+
+    "delete from properties where object_id = ?",
+  )
+
+  /** Removes items that share the exact same coordinates
+    *
+    * This should not occur during normal use but is a possibility
+    * when merging savegames that branched off of the same base save.
+    *
+    * @param from source database
+    * @param to target database
+    */
+  private def removeDuplicateIds(from: Connection, to: Connection): Unit = {
+    val deleteStatements = objectIdDeleteStatements.map(to.prepareStatement)
+
+    val actorPositionStatement = from.createStatement()
+    val inputSet = actorPositionStatement.executeQuery("select * from actor_position " +
+      // avoid touching static_buildables, we handle that separately already.
+      "where id not in (select id from static_buildables)")
+
+    // the last set of coordinates appears to not be relevant when
+    // checking for duplication, and indeed would lead to objects
+    // that should be removed staying around if compared against.
+    val valuesToCompare = List("x", "y", "z", "sx", "sy", "sz") // "rx", "ry", "rz", "rw")
+
+    val compareQuery = s"select * from actor_position where ${valuesToCompare.map(_ + " = ?").mkString(" and ")} " +
+      s"and id not in (select id from static_buildables)"
+    logger.debug(s"compareQuery: $compareQuery")
+    val compareStatement = to.prepareStatement(compareQuery)
+
+    Iterator.continually((inputSet, inputSet.next())).takeWhile(_._2).foreach(resultTuple => {
+      val result = resultTuple._1
+
+      for{ i <- valuesToCompare.indices} {
+        compareStatement.setDouble(i+1, result.getDouble(valuesToCompare(i)))
+      }
+      val resultSet = compareStatement.executeQuery()
+      if(resultSet.next()) {
+        val id = resultSet.getInt("id")
+
+        // remove any trace of id from "to" database
+        logger.debug(s"Removing objectId $id from target...")
+        deleteStatements.foreach(statement => {
+          statement.setInt(1, id)
+          statement.addBatch()
+        })
+
+        deleteStatements.foreach(_.executeBatch())
+        to.commit()
+      }
+    })
   }
 
   private val characterRemovalStatements: List[String] = List(
