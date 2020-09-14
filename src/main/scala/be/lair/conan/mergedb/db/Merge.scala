@@ -109,7 +109,7 @@ object Merge extends Logging {
     * These characters are simply ignored during the merge, preferring the target characters.
     * TODO remap these conflicting characters but show a warning about what is going on so the user is aware.
     */
-  private def resolveCharacterConflicts(from: Connection, to: Connection): List[Int] = {
+  private def resolveCharacterConflicts(from: Connection, to: Connection): (List[Int], List[Int]) = {
     // select character IDs from source database
     val fromCharacterIds = listCharacterIds(from)
     logger.debug(s"fromCharacterIds: $fromCharacterIds")
@@ -120,16 +120,64 @@ object Merge extends Logging {
     val conflictingCharacterIds = fromCharacterIds.intersect(toCharacterIds)
     logger.info(s"Character IDs present in both databases: ${conflictingCharacterIds.mkString(",")}")
 
-    if(conflictingCharacterIds.nonEmpty)
+    if(conflictingCharacterIds.nonEmpty) {
       logger.error("Character object_id conflicts detected, remapping character IDs will result in remapped " +
         "characters losing access to their Thralls.")
+      // remove the conflicts from the source
+      removeConflictingCharacters(to, conflictingCharacterIds)
+    }
+
 
     // see if they conflict with any other IDs in target
-    val conflictingObjectIds = findConflictingObjectIds(to, fromCharacterIds)
+    // make sure we don't accidentally pull in duplicate characters here, hence the diff
+    val conflictingObjectIds = findConflictingObjectIds(to, fromCharacterIds).diff(conflictingCharacterIds)
     logger.info(s"Character IDs from source clashing with object_ids in target database: ${conflictingObjectIds.mkString(",")}")
     mergeConflictIds(to, conflictingObjectIds)
 
-    conflictingObjectIds
+    (conflictingCharacterIds, conflictingObjectIds)
+  }
+
+  private val characterRemovalStatements: List[String] = List(
+    "delete from actor_position where id = ?",
+
+    "delete from buildings where owner_id = ?",
+
+    "delete from characters where id = ?",
+    "delete from character_stats where char_id = ?",
+
+    "update follower_markers set owner_id = ? where owner_id = ?",
+
+    "delete from guilds where owner = ?",
+    //"update game_events set objectId = ? where objectId = ?",
+    "delete from game_events where causerId = ?",
+    "delete from game_events where ownerId = ?",
+
+    "delete from item_inventory where owner_id = ?",
+    "delete from item_properties where owner_id = ?",
+
+    "delete from properties where object_id = ?",
+    "delete from purgescores where purgeid = ?"
+  )
+
+  /** Attempts to remove all references to the characters passed in
+    *
+    * @param connection connection to the database to operate on
+    * @param charIds the character IDs to remove from the database
+    */
+  private def removeConflictingCharacters(connection: Connection, charIds: List[Int]): Unit = {
+    logger.info(s"Removing conflicting characters $charIds from the source database...")
+    val deleteStatements = characterRemovalStatements.map(connection.prepareStatement)
+
+    for{charId <- charIds
+        statement <- deleteStatements} {
+      logger.debug(s"Removing character $charId...")
+      statement.setInt(1, charId)
+      statement.addBatch()
+    }
+
+    logger.debug("Finalizing removal process...")
+    deleteStatements.foreach(_.executeBatch())
+    connection.commit()
   }
 
   /** Return a list of IDs that conflict with the passed in IDs
