@@ -1,4 +1,6 @@
 TODO:
- - build a UI
  - multiple severities for sanity checks
- - handle duplicate character IDs (currently just ignored, meaning the source database character and associated data is just not copied)
+ - improve handling of duplicate character IDs, currently the ones in the target database just get removed as we assume
+   they are duplicates.
+ - add feedback about merge outcome to GUI, currently an output file existing means success. For errors one needs to
+   check the console, which is not exactly user-friendly.
