@@ -44,62 +44,82 @@ object Merge extends Logging {
     ,"static_buildables"
   )
 
+  /** Merge two databases and return the resulting file object */
+  def merge(masterDatabase: File, childDatabase: File): File = {
+    // Create temporary file for our output database
+    val tmpOutputDatabase = File.createTempFile("cex-merged", "output.db")
+    tmpOutputDatabase.deleteOnExit()
+
+    // Copy the master to the output file, so we don't mess up the original.
+    // Using a Stream here means we don't need to overwrite the temp file we just created.
+    val outputDbStream = new FileOutputStream(tmpOutputDatabase)
+    Files.copy(masterDatabase.toPath, outputDbStream)
+
+    // Create temporary database for our child database, so we can safely remap identifiers
+    val tmpChildDb = File.createTempFile("cex-mergedb", "childDb.db")
+    tmpChildDb.deleteOnExit()
+    Files.copy(childDatabase.toPath, new FileOutputStream(tmpChildDb))
+
+    val outputConnection = SaveDatabase.open(tmpOutputDatabase).connection
+    val childConnection = SaveDatabase.open(tmpChildDb).connection
+
+    try {
+      // remap conflicts
+      // need to do this here since we'll be increasing the max(objectid) in the target database
+      resolveCharacterConflicts(childConnection, outputConnection)
+
+      // deal with the scenario where both saves share the same parent, and as such contain items
+      // in the exact same spots.
+      // Trying to straighten this out likely will not go well if the savegames have diverged much.
+      removeDuplicateIds(childConnection, outputConnection)
+
+      // remap non-conflicts
+      logger.info("Remapping mod controller IDs")
+      mergeModControllers(childConnection, outputConnection)
+
+      logger.info("Remapping static_buildables")
+      mergeStaticBuildables(childConnection, outputConnection)
+
+      logger.info("Remapping object IDs")
+      mergeActorPosition(childConnection, outputConnection)
+
+      // copy data
+      logger.info("Copying tables")
+      tablesToCopy.foreach(tableName => copyTable(tableName, childConnection, outputConnection))
+
+      // verify result
+      logger.info("Running sanity checks on merged database...")
+      if (sanityCheck(outputConnection)) {
+        logger.info("Sanity check passed.")
+      } else {
+        logger.error("Sanity check failed!")
+        System.exit(1)
+      }
+    } catch {
+      case e: SQLException => logger.error(e.getMessage, e)
+    } finally {
+      childConnection.close()
+      outputConnection.close()
+
+      if (!tmpChildDb.delete()) {
+        logger.warn(s"Unable to remove temporary database at ${tmpChildDb.getAbsolutePath}")
+      }
+    }
+
+    tmpOutputDatabase
+  }
+
+  /** Merge two databases and write the result to the specified location
+    *
+    * This method will refuse to overwrite existing files to avoid accidentally destroying save data.
+    */
   def merge(masterDatabase: File,
             childDatabase: File,
             outputDatabase: File): Unit = {
-    createOutputDatabase(masterDatabase, outputDatabase) match {
-      case None => logger.error("Output database exists, refusing to overwrite.")
-      case Some(_) =>
-        // Create temporary database for our child database, so we can safely remap identifiers
-        val tmpChildDb = File.createTempFile("cex-mergedb", "childDb.db")
-        tmpChildDb.deleteOnExit()
-        Files.copy(childDatabase.toPath, new FileOutputStream(tmpChildDb))
-
-        val outputConnection = SaveDatabase.open(outputDatabase).connection
-        val childConnection = SaveDatabase.open(tmpChildDb).connection
-
-        try {
-          // remap conflicts
-          // need to do this here since we'll be increasing the max(objectid) in the target database
-          resolveCharacterConflicts(childConnection, outputConnection)
-
-          // deal with the scenario where both saves share the same parent, and as such contain items
-          // in the exact same spots.
-          // Trying to straighten this out likely will not go well if the savegames have diverged much.
-          removeDuplicateIds(childConnection, outputConnection)
-
-          // remap non-conflicts
-          logger.info("Remapping mod controller IDs")
-          mergeModControllers(childConnection, outputConnection)
-
-          logger.info("Remapping static_buildables")
-          mergeStaticBuildables(childConnection, outputConnection)
-
-          logger.info("Remapping object IDs")
-          mergeActorPosition(childConnection, outputConnection)
-
-          // copy data
-          logger.info("Copying tables")
-          tablesToCopy.foreach(tableName => copyTable(tableName, childConnection, outputConnection))
-
-          // verify result
-          logger.info("Running sanity checks on merged database...")
-          if (sanityCheck(outputConnection)) {
-            logger.info("Sanity check passed.")
-          } else {
-            logger.error("Sanity check failed!")
-            System.exit(1)
-          }
-        } catch {
-          case e: SQLException => logger.error(e.getMessage, e)
-        } finally {
-          childConnection.close()
-          outputConnection.close()
-
-          if(!tmpChildDb.delete()) {
-            logger.warn(s"Unable to remove temporary database at ${tmpChildDb.getAbsolutePath}")
-          }
-        }
+    if(outputDatabase.exists()) {
+      logger.error("Output database exists, refusing to overwrite.")
+    } else {
+      Files.copy(merge(masterDatabase, childDatabase).toPath, outputDatabase.toPath)
     }
   }
 
@@ -278,24 +298,6 @@ object Merge extends Logging {
 
     Iterator.continually((resultSet, resultSet.next())).takeWhile(_._2).map(resultTuple =>
       resultTuple._1.getInt(1)).toList
-  }
-
-  /**
-    * Copy the master database to the output location to use as basis of the merge operation
-    *
-    * @param masterDatabase the database file to server as master
-    * @param outputDatabase a File object pointing to the desired output location of the merged database
-    * @return the File object pointing to the outputDatabse, or None if the copy operation failed
-    */
-  private def createOutputDatabase(masterDatabase: File, outputDatabase: File): Option[File] = {
-    if (outputDatabase.exists()) {
-      None
-    } else {
-      val outputDbStream = new FileOutputStream(outputDatabase)
-      Files.copy(masterDatabase.toPath, outputDbStream)
-
-      Some(outputDatabase)
-    }
   }
 
   /** Blindly copy the data from the table in the "from" connection to the same table in the "to" connection.
