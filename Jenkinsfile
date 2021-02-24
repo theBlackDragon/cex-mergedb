@@ -6,6 +6,7 @@ pipeline {
   }
 
   environment {
+    JAVA_HOME = tool 'JDK11'
     SBT_HOME = tool 'Sbt 1.1'
   }
 
