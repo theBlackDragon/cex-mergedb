@@ -1,12 +1,15 @@
 pipeline {
   agent any
 
+  tools {
+    jdk 'JDK11'
+  }
+
   options {
     timestamps()
   }
 
   environment {
-    JAVA_HOME = tool 'JDK11'
     SBT_HOME = tool 'Sbt 1.1'
   }
 
