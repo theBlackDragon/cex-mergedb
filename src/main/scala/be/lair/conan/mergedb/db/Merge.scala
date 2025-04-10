@@ -1,14 +1,15 @@
 package be.lair.conan.mergedb.db
 
+import org.slf4j.LoggerFactory
+
 import java.io.{File, FileOutputStream}
 import java.nio.file.Files
 import java.sql.{Connection, PreparedStatement, SQLException}
-
-import grizzled.slf4j.Logging
-
 import scala.collection.immutable.TreeMap
 
-object Merge extends Logging {
+object Merge {
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   private val tablesToCopy = Vector(
     //"account"

@@ -29,7 +29,7 @@ class DbPanel(parent: Option[JComponent] = None) extends JPanel {
 
   private val outputDbButton = new JButton("Select...")
 
-  outputDbButton.addActionListener { _: ActionEvent =>
+  outputDbButton.addActionListener { (_: ActionEvent) =>
     val chooser = new JFileChooser()
     chooser.showOpenDialog(this) match {
       case JFileChooser.APPROVE_OPTION =>
@@ -47,7 +47,7 @@ class DbPanel(parent: Option[JComponent] = None) extends JPanel {
     case Some(parent) =>
       val removeButton = new JButton("-")
       add(removeButton)
-      removeButton.addActionListener { _: ActionEvent =>
+      removeButton.addActionListener { (_: ActionEvent) =>
         parent.remove(this)
       }
     case None =>

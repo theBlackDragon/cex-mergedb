@@ -1,16 +1,18 @@
 package be.lair.conan.mergedb
 
-import java.awt.event._
+import java.awt.event.*
 import java.awt.{BorderLayout, Color}
 import java.io.File
 import java.nio.file.Files
-
 import be.lair.conan.mergedb.db.Merge
-import grizzled.slf4j.Logging
-import javax.swing._
+import org.slf4j.LoggerFactory
 
-object Main extends Logging {
+import javax.swing.*
 
+object Main {
+
+  private val logger = LoggerFactory.getLogger(getClass)
+  
   private var outputFile: Option[File] = None
 
   def main(args: Array[String]): Unit = {
@@ -58,11 +60,11 @@ object Main extends Logging {
     /* **********************
      *      Listeners       *
      ********************** */
-    addButton.addActionListener { _: ActionEvent =>
+    addButton.addActionListener { (_: ActionEvent) =>
       inputDbPanel.add(new DbPanel(Some(inputDbPanel)))
     }
 
-    outputDbButton.addActionListener { _: ActionEvent => {
+    outputDbButton.addActionListener { (_: ActionEvent) => {
       val chooser = new JFileChooser()
       chooser.showOpenDialog(mainFrame) match {
         case JFileChooser.APPROVE_OPTION =>
@@ -88,7 +90,7 @@ object Main extends Logging {
       }
     })
 
-    mergeButton.addActionListener { _: ActionEvent => {
+    mergeButton.addActionListener { (_: ActionEvent) => {
       val output = inputDbPanel.getComponents.filter(_.isInstanceOf[DbPanel])
         .flatMap{ case panel: DbPanel => panel.selectedFile}
         .reduceLeft((a, b) => Merge.merge(a, b))
